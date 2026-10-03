@@ -148,18 +148,23 @@ function spotlightHtml(artist) {
     <button class="no-print" data-action="download">Download my month</button></section>`;
 }
 
+function daySectionHtml(day, entries) {
+  const isToday = day === state.today && !isOver();
+  const empty = `<p class="empty-day">No submissions yet${state.picked.size ? ` from ${[...state.picked].map(esc).join(", ")}` : ""}</p>`;
+  return `<section class="day x${day % 5}${isToday ? " today" : ""}" id="day-${day}">
+    <h2>${day > 0 ? "Day " + day : "Undated"}${isToday ? '<span class="badge">Today</span>' : ""}${PROMPTS[day - 1] ? `<span class="prompt">${esc(PROMPTS[day - 1])}</span>` : ""}
+      ${entries.length ? `<small>${plural(entries.length, "drawing")}</small>` : ""}</h2>
+    ${entries.length ? `<div class="grid">${entries.map(([x, i]) => cardHtml(x, i)).join("")}</div>` : empty}</section>`;
+}
+
 function galleryView() {
   const spotlight = state.picked.size === 1 ? spotlightHtml([...state.picked][0]) : "";
-  if (!state.shown.length) return spotlight + `<p class="empty">No drawings match these artists. Try showing everyone.</p>`;
   const groups = groupByDay();
-  const sections = [...groups.keys()].sort((a, b) => b - a).map((day) => {
-    const entries = groups.get(day), isToday = day === state.today && !isOver();
-    return `<section class="day x${day % 5}${isToday ? " today" : ""}" id="day-${day}">
-      <h2>${day > 0 ? "Day " + day : "Undated"}${isToday ? '<span class="badge">Today</span>' : ""}${PROMPTS[day - 1] ? `<span class="prompt">${esc(PROMPTS[day - 1])}</span>` : ""}
-        <small>${plural(entries.length, "drawing")}</small></h2>
-      <div class="grid">${entries.map(([x, i]) => cardHtml(x, i)).join("")}</div></section>`;
-  });
-  return spotlight + sections.join("");
+  const showToday = !isOver() && state.today >= 1 && state.today <= 31; // today always gets a section, even when empty
+  if (showToday && !groups.has(state.today)) groups.set(state.today, []);
+  const days = [...groups.keys()].sort((a, b) => b - a);
+  if (!days.length) return spotlight + `<p class="empty">No drawings match these artists. Try showing everyone.</p>`;
+  return spotlight + days.map((day) => daySectionHtml(day, groups.get(day))).join("");
 }
 
 function promptsView() {
