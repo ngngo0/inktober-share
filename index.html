@@ -1,76 +1,60 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Our Inktober Gallery</title>
-    <style>
-        body { font-family: sans-serif; background: #121212; color: #fff; text-align: center; padding: 20px; }
-        .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; max-width: 1200px; margin: 40px auto; }
-        .card { background: #1e1e1e; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-        .card img { width: 100%; height: 250px; object-fit: cover; display: block; }
-        .card p { padding: 10px; margin: 0; font-size: 0.9rem; color: #aaa; }
-        #loading { font-size: 1.2rem; color: #ffd700; margin-top: 50px; }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inktober 2026 Gallery</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎃</text></svg>">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat+Brush&family=Patrick+Hand&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js" defer></script>
+  <script src="app.js" defer></script>
 </head>
 <body>
+  <header>
+    <h1>Inktober 2026</h1>
+    <p class="sub">31 days, 31 drawings. Newest on top. Tap a name to see just their work.</p>
+  </header>
 
-    <h1>Inktober Drawing Feed 🎨</h1>
-    <p>Submissions update automatically upon page refresh!</p>
+  <nav class="site-nav" aria-label="Site">
+    <div class="btn-row tabs" id="tabs" role="group" aria-label="View">
+      <button type="button" data-action="view" data-view="gallery" aria-pressed="true">Gallery</button>
+      <button type="button" data-action="view" data-view="prompts" aria-pressed="false">Prompts</button>
+      <button type="button" data-action="view" data-view="grid" aria-pressed="false">Who posted</button>
+      <button type="button" data-action="view" data-view="recap" aria-pressed="false">Recap</button>
+    </div>
+    <div class="btn-row">
+      <button type="button" id="today" data-action="today">Jump to today</button>
+      <button type="button" data-action="share">Copy link</button>
+    </div>
+  </nav>
 
-    <div id="loading">Gathering artwork from Google Drive...</div>
-    <div class="gallery-grid" id="gallery"></div>
+  <div class="filters" role="search">
+    <div class="tags" id="tags" role="group" aria-label="Filter by artist"></div>
+    <button type="button" class="link" id="reset" data-action="reset" hidden>Clear</button>
+    <span class="count" id="count" aria-live="polite"></span>
+  </div>
+  <p class="nudge" id="nudge" aria-live="polite"></p>
 
-    <script>
-        // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE
-        const API_URL = "https://script.google.com/macros/s/AKfycbycxrB4ayR1ipycB7lojIeaKuBmP-31oS93trxwioAP93nvlxKRlQGeI18XiDD30eTf/exec";
+  <main id="main"><p class="empty">Summoning the drawings…</p></main>
+  <footer><p>Happy Inktober 🕯️ Every drawing belongs to its artist.</p></footer>
 
-        async function fetchInktoberArt() {
-            const galleryElement = document.getElementById('gallery');
-            const loadingElement = document.getElementById('loading');
-
-            try {
-                // 1. Fetch data from your deployed Google Apps Script
-                const response = await fetch(API_URL);
-                const artSupplies = await response.json();
-
-                // 2. Clear out loading text
-                loadingElement.style.display = 'none';
-
-                if(artSupplies.length === 0) {
-                    loadingElement.innerText = "No drawings submitted yet!";
-                    loadingElement.style.display = 'block';
-                    return;
-                }
-
-                // 3. Loop through your images and paint them onto the webpage layout
-                artSupplies.forEach(item => {
-                    const card = document.createElement('div');
-                    card.className = 'card';
-
-                    const img = document.createElement('img');
-                    img.src = item.imageUrl;
-                    img.alt = item.title;
-                    img.loading = "lazy"; // Optimizes image loading speeds
-
-                    const caption = document.createElement('p');
-                    // Removes file extensions like .jpg from display title
-                    caption.innerText = item.title.replace(/\.[^/.]+$/, ""); 
-
-                    card.appendChild(img);
-                    card.appendChild(caption);
-                    galleryElement.appendChild(card);
-                });
-
-            } catch (error) {
-                console.error("Error fetching data:", error);
-                loadingElement.innerText = "Failed to load drawings. Check console logs.";
-                loadingElement.style.color = "#ff4d4d";
-            }
-        }
-
-        // Run the script immediately when the visitor opens the website
-        fetchInktoberArt();
-    </script>
+  <dialog class="viewer" id="viewer" aria-label="Drawing viewer">
+    <button type="button" class="viewer-close" data-action="close" aria-label="Close viewer">✕</button>
+    <button type="button" class="viewer-step prev" data-action="prev" aria-label="Previous drawing">‹</button>
+    <figure>
+      <img id="viewer-img" alt="" referrerpolicy="no-referrer">
+      <figcaption>
+        <div class="viewer-word" id="viewer-word"></div>
+        <div class="viewer-meta" id="viewer-meta"></div>
+        <div class="viewer-actions">
+          <button type="button" id="viewer-artist" data-action="viewer-artist"></button>
+          <a id="viewer-full" target="_blank" rel="noopener">Open full size</a>
+        </div>
+        <span class="viewer-count" id="viewer-count"></span>
+      </figcaption>
+    </figure>
+    <button type="button" class="viewer-step next" data-action="next" aria-label="Next drawing">›</button>
+  </dialog>
 </body>
 </html>
