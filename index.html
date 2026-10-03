@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Our Inktober Gallery</title>
+    <style>
+        body { font-family: sans-serif; background: #121212; color: #fff; text-align: center; padding: 20px; }
+        .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; max-width: 1200px; margin: 40px auto; }
+        .card { background: #1e1e1e; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        .card img { width: 100%; height: 250px; object-fit: cover; display: block; }
+        .card p { padding: 10px; margin: 0; font-size: 0.9rem; color: #aaa; }
+        #loading { font-size: 1.2rem; color: #ffd700; margin-top: 50px; }
+    </style>
+</head>
+<body>
+
+    <h1>Inktober Drawing Feed 🎨</h1>
+    <p>Submissions update automatically upon page refresh!</p>
+
+    <div id="loading">Gathering artwork from Google Drive...</div>
+    <div class="gallery-grid" id="gallery"></div>
+
+    <script>
+        // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE
+        const API_URL = "https://script.google.com/macros/s/AKfycbycxrB4ayR1ipycB7lojIeaKuBmP-31oS93trxwioAP93nvlxKRlQGeI18XiDD30eTf/exec";
+
+        async function fetchInktoberArt() {
+            const galleryElement = document.getElementById('gallery');
+            const loadingElement = document.getElementById('loading');
+
+            try {
+                // 1. Fetch data from your deployed Google Apps Script
+                const response = await fetch(API_URL);
+                const artSupplies = await response.json();
+
+                // 2. Clear out loading text
+                loadingElement.style.display = 'none';
+
+                if(artSupplies.length === 0) {
+                    loadingElement.innerText = "No drawings submitted yet!";
+                    loadingElement.style.display = 'block';
+                    return;
+                }
+
+                // 3. Loop through your images and paint them onto the webpage layout
+                artSupplies.forEach(item => {
+                    const card = document.createElement('div');
+                    card.className = 'card';
+
+                    const img = document.createElement('img');
+                    img.src = item.imageUrl;
+                    img.alt = item.title;
+                    img.loading = "lazy"; // Optimizes image loading speeds
+
+                    const caption = document.createElement('p');
+                    // Removes file extensions like .jpg from display title
+                    caption.innerText = item.title.replace(/\.[^/.]+$/, ""); 
+
+                    card.appendChild(img);
+                    card.appendChild(caption);
+                    galleryElement.appendChild(card);
+                });
+
+            } catch (error) {
+                console.error("Error fetching data:", error);
+                loadingElement.innerText = "Failed to load drawings. Check console logs.";
+                loadingElement.style.color = "#ff4d4d";
+            }
+        }
+
+        // Run the script immediately when the visitor opens the website
+        fetchInktoberArt();
+    </script>
+</body>
+</html>
