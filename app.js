@@ -127,7 +127,7 @@ const image = (x, alt = "") => `<img loading="lazy" referrerpolicy="no-referrer"
 const cardHtml = (x, i) => `
   <button class="card" ${tint(x.artist)} data-action="open" data-index="${i}" aria-label="Open ${esc(x.title)}">
     ${image(x, `Drawing by ${x.artist}, day ${dayOf(x)}`)}
-    <strong>${esc(x.artist)}</strong><span>${esc(dateLabel(x))}</span>
+    <strong>${esc(x.artist)}</strong><span>${esc(x.caption)}</span>
   </button>`;
 
 const statHtml = (value, label, colorAttr) => `<div ${colorAttr}><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`;
