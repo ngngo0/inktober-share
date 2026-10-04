@@ -8,7 +8,7 @@
    ========================================================================== */
 
 /* ---- Config (edit config.js) ---- */
-const { API_URL, YEAR, MONTH, PROMPTS, ARTIST_COLORS, DEFAULT_COLORS } = CONFIG;
+const { SUPABASE, YEAR, MONTH, PROMPTS, ARTIST_COLORS, DEFAULT_COLORS, UPLOAD, REACTIONS } = CONFIG;
 
 /* ---- Helpers ---- */
 const $ = (id) => document.getElementById(id);
@@ -29,6 +29,7 @@ const state = {
   artists: [],   // sorted artist names
   days: new Map(), // artist -> Set of days posted
   colors: new Map(), // artist -> CSS color
+  reactions: {},     // drawing id -> { emoji: { n: count, mine: did this browser react } }
   today: 0,
   view: params.get("view") || "gallery",
   picked: new Set((params.get("artist") || "").split(",").filter(Boolean)),
@@ -57,12 +58,33 @@ function makeDemoData() {
   return items;
 }
 
+const LIVE = Boolean(SUPABASE.URL); // no project configured = demo mode
+
+const supabaseFetch = (path, options = {}) => fetch(SUPABASE.URL + path, {
+  ...options,
+  headers: { apikey: SUPABASE.ANON_KEY, Authorization: `Bearer ${SUPABASE.ANON_KEY}`, ...options.headers },
+});
+const publicUrl = (path) => `${SUPABASE.URL}/storage/v1/object/public/${SUPABASE.BUCKET}/${path}`;
+const toItem = (row) => ({ // database row -> the shape the rest of the app uses
+  id: row.id,
+  title: `${row.artist} - Oct ${row.inktober_day}, ${YEAR}`,
+  artist: row.artist,
+  caption: row.caption || "",
+  inktoberDay: String(row.inktober_day),
+  imageUrl: publicUrl(row.image_path),
+});
+
 async function loadData() {
-  if (!API_URL) return makeDemoData();
-  const res = await fetch(API_URL);
-  if (!res.ok) throw new Error(res.status);
-  const json = await res.json();
-  return Array.isArray(json) ? json : json.galleryData || json.data || [];
+  if (!LIVE) return makeDemoData();
+  const rows = [], PAGE = 1000; // the API caps each response, so read in pages
+  for (let offset = 0; ; offset += PAGE) {
+    const res = await supabaseFetch(`/rest/v1/drawings?select=id,artist,inktober_day,image_path,caption&order=created_at,id&limit=${PAGE}&offset=${offset}`);
+    if (!res.ok) throw new Error(res.status);
+    const page = await res.json();
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return rows.map(toItem);
 }
 
 function indexData(items) {
@@ -125,10 +147,13 @@ function groupByDay() { // Map day -> [[drawing, index in state.shown]]
 const image = (x, alt = "") => `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(x.imageUrl)}" alt="${esc(alt)}">`;
 
 const cardHtml = (x, i) => `
-  <button class="card" ${tint(x.artist)} data-action="open" data-index="${i}" aria-label="Open ${esc(x.title)}">
-    ${image(x, `Drawing by ${x.artist}, day ${dayOf(x)}`)}
-    <strong>${esc(x.artist)}</strong><span>${esc(x.caption)}</span>
-  </button>`;
+  <article class="card" ${tint(x.artist)}>
+    <button class="card-open" data-action="open" data-index="${i}" aria-label="Open ${esc(x.title)}">
+      ${image(x, `Drawing by ${x.artist}, day ${dayOf(x)}`)}
+      <strong>${esc(x.artist)}</strong><span>${esc(x.caption || dateLabel(x))}</span>
+    </button>
+    <div class="reactions" data-id="${esc(x.id)}" role="group" aria-label="Reactions">${reactionButtons(x.id)}</div>
+  </article>`;
 
 const statHtml = (value, label, colorAttr) => `<div ${colorAttr}><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`;
 
@@ -224,7 +249,7 @@ function recapView() {
 }
 
 /* ---- Render ---- */
-const views = { gallery: galleryView, prompts: promptsView, grid: calendarView, recap: recapView };
+const views = { gallery: galleryView, prompts: promptsView, grid: calendarView, recap: recapView, submit: submitView };
 
 function syncUrl() {
   const next = new URLSearchParams();
@@ -240,6 +265,7 @@ function render() {
 
   document.querySelectorAll("#tabs button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.view === view));
   $("today").hidden = view !== "gallery";
+  $("filters").hidden = view === "submit";
   $("reset").hidden = !picked.size;
   $("count").textContent = view === "gallery" || view === "prompts" ? plural(state.shown.length, "drawing") : "";
   $("tags").innerHTML = state.artists.map(chipHtml).join("");
@@ -257,6 +283,69 @@ function showDay(day) {
   (document.getElementById("day-" + day) || document.querySelector(".day"))?.scrollIntoView({ block: "start" });
 }
 
+/* ---- Reactions ---- */
+function reactorId() { // an anonymous id kept in this browser; it's how one person's reaction is told from another's
+  try {
+    let id = localStorage.getItem("inktober-reactor");
+    if (!id) localStorage.setItem("inktober-reactor", (id = crypto.randomUUID()));
+    return id;
+  } catch { return (reactorId.fallback ||= crypto.randomUUID()); }
+}
+
+const reactionOf = (id, emoji) => (state.reactions[id] || {})[emoji] || { n: 0, mine: false };
+
+function reactionButtons(id) {
+  return REACTIONS.map((emoji) => {
+    const { n, mine } = reactionOf(id, emoji);
+    return `<button type="button" class="react" data-action="react" data-id="${esc(id)}" data-emoji="${emoji}"
+      aria-pressed="${mine}" aria-label="${emoji}: ${plural(n, "reaction")}">${emoji}${n ? `<span>${n}</span>` : ""}</button>`;
+  }).join("");
+}
+
+function refreshReactions(id) { // redraw the reaction buttons for one drawing (or all), on the card and in the viewer
+  document.querySelectorAll(id ? `.reactions[data-id="${id}"]` : ".reactions").forEach((bar) => {
+    const focused = bar.contains(document.activeElement) ? document.activeElement.dataset.emoji : null;
+    bar.innerHTML = reactionButtons(bar.dataset.id);
+    if (focused) [...bar.children].find((b) => b.dataset.emoji === focused)?.focus();
+  });
+}
+
+async function loadReactions() {
+  state.reactions = {};
+  if (!LIVE) return;
+  const res = await supabaseFetch("/rest/v1/rpc/reaction_summary", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ p_reactor: reactorId() }),
+  });
+  if (!res.ok) return; // reactions are optional: the gallery works without them
+  for (const row of await res.json()) (state.reactions[row.drawing_id] ||= {})[row.emoji] = { n: row.n, mine: row.mine };
+}
+
+function setReaction(id, emoji, mine) {
+  const { n } = reactionOf(id, emoji);
+  (state.reactions[id] ||= {})[emoji] = { n: Math.max(0, n + (mine ? 1 : -1)), mine };
+  refreshReactions(id);
+}
+
+const pendingReactions = new Set(); // ignore double-clicks while a request is in flight
+async function toggleReaction(id, emoji) {
+  const key = id + emoji;
+  if (pendingReactions.has(key)) return;
+  pendingReactions.add(key);
+  const mine = !reactionOf(id, emoji).mine;
+  setReaction(id, emoji, mine); // update right away; undo below if the server says no
+  try {
+    if (LIVE) {
+      const res = await supabaseFetch("/rest/v1/rpc/toggle_reaction", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ p_drawing: id, p_emoji: emoji, p_reactor: reactorId() }),
+      });
+      if (!res.ok) throw new Error(res.status);
+      if ((await res.json()) !== mine) { await loadReactions(); refreshReactions(); } // out of sync (e.g. another tab): trust the server
+    }
+  } catch { setReaction(id, emoji, !mine); }
+  finally { pendingReactions.delete(key); }
+}
+
 /* ---- Viewer (native <dialog>: focus trap, Escape and focus return come built in) ---- */
 const viewer = $("viewer");
 
@@ -272,6 +361,9 @@ function openViewer(index) {
   img.alt = `Drawing by ${x.artist} for day ${day}${word ? ", " + word : ""}`;
   $("viewer-word").textContent = word || "Day " + day;
   $("viewer-meta").textContent = `Day ${day} by ${x.artist}`;
+  const bar = $("viewer-reactions");
+  bar.dataset.id = x.id;
+  bar.innerHTML = reactionButtons(x.id);
   $("viewer-artist").textContent = `More from ${x.artist}`;
   $("viewer-artist").dataset.artist = x.artist;
   $("viewer-full").href = x.imageUrl;
@@ -319,9 +411,135 @@ async function downloadCollage(items, filename) {
   }
 }
 
+/* ---- Submit view ---- */
+const wordFor = (day) => PROMPTS[day - 1] || "";
+
+function submitView() {
+  const maxDay = Math.min(Math.max(state.today, 1), 31);
+  const options = Array.from({ length: maxDay }, (_, i) => maxDay - i) // newest first, so today is the default
+    .map((day) => `<option value="${day}">Day ${day}${wordFor(day) ? ": " + esc(wordFor(day)) : ""}${day === state.today && !isOver() ? " (today)" : ""}</option>`).join("");
+  return `<section class="panel x0"><h3>Submit your artwork</h3>
+    <p>Prompt: <span class="prompt x0" id="submit-word">${esc(wordFor(maxDay))}</span></p>
+    <form class="form" id="submit-form">
+      <label>Your name <input name="artist" list="artist-names" required maxlength="40" autocomplete="name"></label>
+      <datalist id="artist-names">${state.artists.map((a) => `<option value="${esc(a)}">`).join("")}</datalist>
+      <label>Day <select name="day">${options}</select></label>
+      <label>Your drawing <input type="file" name="image" accept="image/jpeg,image/png,image/webp" required></label>
+      <img class="upload-preview" id="upload-preview" alt="Preview of your drawing" hidden>
+      <label>Caption (optional) <input name="caption" maxlength="140" autocomplete="off"></label>
+      <label>Super Secret Code <input name="code" required></label>
+
+      <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <button class="primary" type="submit">Submit drawing</button>
+      <p class="status" id="submit-status" role="status"></p>
+    </form></section>`;
+}
+
+let previewUrl = null;
+function showPreview(file) {
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = file ? URL.createObjectURL(file) : null;
+  const img = $("upload-preview");
+  img.hidden = !file;
+  if (file) img.src = previewUrl;
+}
+
+function setStatus(html, isError = false) {
+  const el = $("submit-status");
+  el.innerHTML = html;
+  el.classList.toggle("error", isError);
+}
+
+const UPLOAD_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+
+const readFile = (file) => new Promise((resolve, reject) => { // demo mode only: the original file as a data URL
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = () => reject(new Error("Couldn't read that file."));
+  reader.readAsDataURL(file);
+});
+
+async function uploadDrawing({ code, artist, day, file, caption }) {
+  // Phase 1: Quick verification call to check passcode before uploading
+  const verifyRes = await supabaseFetch("/rest/v1/rpc/validate_code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ p_code: code })
+  });
+
+  if (!verifyRes.ok) {
+    const errData = await verifyRes.json().catch(() => ({}));
+    throw new Error(errData.message || "Invalid access code. Upload aborted.");
+  }
+
+  // Phase 2: Upload file (Only reached if Phase 1 succeeded)
+  const path = `${day}/${crypto.randomUUID()}.${UPLOAD_TYPES[file.type]}`;
+  const upload = await supabaseFetch(`/storage/v1/object/${SUPABASE.BUCKET}/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": file.type },
+    body: file
+  });
+
+  if (!upload.ok) {
+    throw new Error("The file upload failed. Please try again.");
+  }
+
+  // Phase 3: Submit artwork row to drawings table via RPC
+  const saveRes = await supabaseFetch("/rest/v1/rpc/submit_artwork", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      p_code: code,
+      p_artist: artist,
+      p_day: day,
+      p_caption: caption || null,
+      p_image_path: path
+    })
+  });
+
+  if (!saveRes.ok) {
+    throw new Error("Drawing uploaded, but saving to gallery failed.");
+  }
+
+}
+
+
+async function submitArtwork({ artist, day, file, caption = "", code }) {
+  if (!file || !(file.type in UPLOAD_TYPES)) throw new Error("Please choose a JPEG, PNG or WebP image.");
+  if (file.size > UPLOAD.MAX_FILE_MB * 1024 * 1024) throw new Error(`Please choose an image under ${UPLOAD.MAX_FILE_MB} MB.`);
+  if (LIVE) {
+    await uploadDrawing({ artist, day, file, caption, code });
+    indexData(await loadData());
+    return;
+  }
+  const imageUrl = await readFile(file); // demo mode: add it locally so you can see the whole flow
+  indexData([...state.all, { id: `local-${Date.now()}`, title: `${artist} - Oct ${day}, ${YEAR}`, artist, caption, inktoberDay: String(day), imageUrl }]);
+}
+
+
+
+async function handleSubmit(form) {
+  const data = new FormData(form);
+  if (data.get("website")) return; // honeypot: bots fill in hidden fields, people don't
+  const button = form.querySelector("button[type=submit]");
+  button.disabled = true;
+  setStatus("Uploading your drawing…");
+  try {
+    await submitArtwork({ artist: data.get("artist").trim(), day: +data.get("day"), file: data.get("image"), caption: data.get("caption").trim(), code: data.get("code")});
+    showPreview(null);
+    render(); // refreshes the artist tags; the form comes back empty
+    setStatus('Thank you! Your drawing is in. <button type="button" class="link" data-action="view" data-view="gallery">See the gallery</button>');
+  } catch (err) {
+    setStatus(esc(err.message || "Something went wrong. Please try again."), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 /* ---- Actions: one click listener, driven by data-action attributes ---- */
 const actions = {
   open: (el) => openViewer(+el.dataset.index),
+  react: (el) => toggleReaction(el.dataset.id, el.dataset.emoji),
   goto: (el) => showDay(+el.dataset.day),
   jump: (el) => { state.picked = new Set([el.dataset.artist]); showDay(+el.dataset.day); },
   pick: (el) => { const a = el.dataset.artist; state.picked.has(a) ? state.picked.delete(a) : state.picked.add(a); render(); },
@@ -351,7 +569,15 @@ document.addEventListener("click", (e) => {
   if (el) actions[el.dataset.action]?.(el);
 });
 
+document.addEventListener("submit", (e) => {
+  if (e.target.id === "submit-form") { e.preventDefault(); handleSubmit(e.target); }
+});
+document.addEventListener("change", (e) => {
+  if (e.target.name === "image") showPreview(e.target.files[0]);
+  if (e.target.name === "day") $("submit-word").textContent = wordFor(+e.target.value);
+});
+
 /* ---- Init ---- */
 loadData()
-  .then((items) => { indexData(items); if (isOver() && !params.get("view")) state.view = "recap"; render(); })
-  .catch(() => { $("main").innerHTML = `<p class="empty">The gallery couldn't load. Check the API_URL and reload the page.</p>`; });
+  .then(async (items) => { indexData(items); await loadReactions().catch(() => {}); if (isOver() && !params.get("view")) state.view = "recap"; render(); })
+  .catch(() => { $("main").innerHTML = `<p class="empty">The gallery couldn't load. Check the SUPABASE settings in config.js and reload the page.</p>`; });

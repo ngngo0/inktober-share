@@ -13,7 +13,7 @@
 <body>
   <header>
     <h1>Inktober 2026</h1>
-    <p class="sub">31 days, 31 drawings. Newest on top. Tap a name to see just their work.</p>
+    <p class="sub">31 days, 31 drawings. Tap a name to see just their work.</p>
   </header>
 
   <nav class="site-nav" aria-label="Site">
@@ -22,6 +22,7 @@
       <button type="button" data-action="view" data-view="prompts" aria-pressed="false">Prompts</button>
       <button type="button" data-action="view" data-view="grid" aria-pressed="false">Who posted</button>
       <button type="button" data-action="view" data-view="recap" aria-pressed="false">Recap</button>
+      <button type="button" data-action="view" data-view="submit" aria-pressed="false">Submit</button>
     </div>
     <div class="btn-row">
       <button type="button" id="today" data-action="today">Jump to today</button>
@@ -29,7 +30,7 @@
     </div>
   </nav>
 
-  <div class="filters" role="search">
+  <div class="filters" id="filters" role="search">
     <div class="tags" id="tags" role="group" aria-label="Filter by artist"></div>
     <button type="button" class="link" id="reset" data-action="reset" hidden>Clear</button>
     <span class="count" id="count" aria-live="polite"></span>
@@ -47,6 +48,7 @@
       <figcaption>
         <div class="viewer-word" id="viewer-word"></div>
         <div class="viewer-meta" id="viewer-meta"></div>
+        <div class="reactions" id="viewer-reactions" role="group" aria-label="Reactions"></div>
         <div class="viewer-actions">
           <button type="button" id="viewer-artist" data-action="viewer-artist"></button>
           <a id="viewer-full" target="_blank" rel="noopener">Open full size</a>
